@@ -1,0 +1,17 @@
+genotypename: toy.geno
+snpname: toy.snp
+indivname: toy.ind
+poplistname: poplist.txt
+admixpop: Mix
+output: Toy.out
+binsize: 0.005
+maxdis: 0.025
+seed: 77
+runmode: 1
+checkmap: NO
+numchrom: 2
+qbin: 0
+jackknife: YES
+runfit: YES
+afffit: YES
+lovalfit: 0.45

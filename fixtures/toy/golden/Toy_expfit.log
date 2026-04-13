@@ -1,0 +1,8 @@
+dates_expfit version: 200
+step (Morgans) ::     0.005000
+fitting 1 exponentials
+error sd:     0.329624
+halflife:     2.167268
+mean (generations):    63.965071
+coefficients:    -0.386372
+##end of run

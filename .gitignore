@@ -1,0 +1,25 @@
+/target/
+
+# Editor and OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Root-level DATES runtime outputs created during local runs.
+/Mix:log
+/*:expfit.out
+/*:log
+/expfit_*.flog
+/expfit_*.log
+/*_expfit.log
+/*.fit
+/*.jin
+/*.jout
+/*.out
+/*.out:*
+/*.pdf
+/*.ps
+/*.xtxt

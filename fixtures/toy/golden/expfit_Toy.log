@@ -1,0 +1,16 @@
+dates_expfit version: 200
+step (Morgans) ::     0.005000
+fitting 1 exponentials + affine
+error sd:     0.457471
+halflife: 693147199.816913
+mean (generations):     0.000000
+coefficients: -191791705.027483 191791704.432326
+##end of run
+dates_expfit version: 200
+step (Morgans) ::     0.005000
+fitting 1 exponentials + affine
+error sd:     0.397627
+halflife: 693147199.816913
+mean (generations):     0.000000
+coefficients: -240683600.492319 240683599.689155
+##end of run
