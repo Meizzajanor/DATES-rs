@@ -162,11 +162,8 @@ fn run_job(
         bail!("no admixed samples found");
     }
 
-    let max_chrom = if params.numchrom > 0 {
-        params.numchrom
-    } else {
-        22
-    };
+    let max_chrom = params.numchrom;
+    let num_chroms = max_chrom as usize + 1;
     let mut selected = Vec::new();
     for (snp_index, snp) in dataset.snps.iter().enumerate() {
         if snp.chrom < 1 || snp.chrom > max_chrom {
@@ -241,7 +238,7 @@ fn run_job(
     }
 
     let num_bins = (params.maxdis / params.binsize).round() as usize + 5;
-    let mut chrom_corr = vec![vec![Corr::default(); num_bins]; max_chrom as usize + 1];
+    let mut chrom_corr = vec![vec![Corr::default(); num_bins]; num_chroms];
     if params.qbin > 0 {
         run_qbin_mode(dataset, &selected, &admixed, params, &mut chrom_corr)?;
     } else {
@@ -268,12 +265,7 @@ fn run_job(
         params.runmode,
     )?;
     if params.jackknife {
-        for (chrom, chrom_bins) in chrom_corr
-            .iter()
-            .enumerate()
-            .take(max_chrom as usize + 1)
-            .skip(1)
-        {
+        for (chrom, chrom_bins) in chrom_corr.iter().enumerate().take(num_chroms).skip(1) {
             let mut leave_out = Vec::with_capacity(num_bins);
             for bin in 0..num_bins {
                 leave_out.push(global[bin].minus(chrom_bins[bin])?);
