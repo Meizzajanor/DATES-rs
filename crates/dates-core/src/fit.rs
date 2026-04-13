@@ -28,6 +28,9 @@ pub fn fit_request(request: &FitRequest) -> Result<FitResult> {
     if step < 0.0 {
         bail!("step negative");
     }
+    if step == 0.0 {
+        step = 1.0;
+    }
     rows.retain(|(distance_cm, _)| {
         *distance_cm >= request.low_cm && *distance_cm <= request.high_cm
     });
@@ -76,9 +79,6 @@ pub fn fit_request(request: &FitRequest) -> Result<FitResult> {
         .collect::<Vec<_>>();
     if let Some(output) = &request.output {
         write_fit_rows(output, &rows)?;
-    }
-    if step == 0.0 {
-        step = 1.0;
     }
     Ok(FitResult {
         rows,
@@ -287,5 +287,37 @@ mod tests {
         assert_eq!(result.basis.len(), 1);
         assert!(!result.rows.is_empty());
         let _ = PathBuf::from("unused");
+    }
+
+    #[test]
+    fn fit_request_normalizes_zero_step_before_generation_conversion() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("toy.out");
+        fs::write(
+            &input,
+            "0.5 0.050\n0.6 0.040\n0.7 0.033\n0.8 0.026\n0.9 0.021\n",
+        )
+        .unwrap();
+        let result = fit_request(&FitRequest {
+            input,
+            output: None,
+            num_exp: 1,
+            data_col: 1,
+            low_cm: 0.5,
+            high_cm: 5.0,
+            step_morgans: Some(0.0),
+            add_x: 0.0,
+            affine: true,
+            seed: 77,
+        })
+        .unwrap();
+        assert_eq!(result.step_morgans, 1.0);
+        assert!(
+            result
+                .mean_generations
+                .iter()
+                .all(|value| value.is_finite())
+        );
+        assert!(result.coefficients.iter().all(|value| value.is_finite()));
     }
 }

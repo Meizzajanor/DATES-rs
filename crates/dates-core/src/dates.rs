@@ -54,12 +54,12 @@ pub fn run_dates(par_path: &Path, verbose: bool) -> Result<()> {
         eprintln!("parameter file: {}", par_path.display());
     }
 
-    let badsnp = params.badsnpname.as_ref().map(Path::new);
+    let badsnp = resolve_optional_param_path(&par_path, params.badsnpname.as_deref());
     let dataset = Dataset::load(
         resolve_param_path(&par_path, &params.genotypename),
         resolve_param_path(&par_path, &params.snpname),
         resolve_param_path(&par_path, &params.indivname),
-        badsnp,
+        badsnp.as_deref(),
     )?;
     if params.checkmap && !dataset.has_real_map() {
         bail!("running DATES without a real map; set checkmap: NO if that is intentional");
@@ -616,6 +616,10 @@ fn resolve_param_path(par_path: &Path, raw: &str) -> PathBuf {
     }
 }
 
+fn resolve_optional_param_path(par_path: &Path, raw: Option<&str>) -> Option<PathBuf> {
+    raw.map(|path| resolve_param_path(par_path, path))
+}
+
 fn load_jobs_resolved(params: &DatesParams, par_path: &Path) -> Result<Vec<AdmixJob>> {
     if let Some(admixlist) = &params.admixlist {
         let path = resolve_param_path(par_path, admixlist);
@@ -665,4 +669,25 @@ fn load_jobs_resolved(params: &DatesParams, par_path: &Path) -> Result<Vec<Admix
             .ok_or_else(|| anyhow!("missing admixpop"))?,
         output_dir: None,
     }])
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+
+    use super::resolve_optional_param_path;
+
+    #[test]
+    fn resolves_optional_paths_against_parameter_directory() {
+        let par_path = Path::new("/tmp/dates/parfile.par");
+        assert_eq!(
+            resolve_optional_param_path(par_path, Some("badsnps.txt")),
+            Some(PathBuf::from("/tmp/dates/badsnps.txt"))
+        );
+        assert_eq!(
+            resolve_optional_param_path(par_path, Some("/data/badsnps.txt")),
+            Some(PathBuf::from("/data/badsnps.txt"))
+        );
+        assert_eq!(resolve_optional_param_path(par_path, None), None);
+    }
 }
