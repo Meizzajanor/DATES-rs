@@ -324,7 +324,7 @@ fn load_text_genotypes(path: &Path, snps: &mut [Snp], num_individuals: usize) ->
         line_buf.clear();
         let bytes_read = reader
             .read_line(&mut line_buf)
-            .with_context(|| format!("{} is not valid UTF-8 text geno input", path.display()))?;
+            .with_context(|| format!("failed to read line from geno file {}", path.display()))?;
         if bytes_read == 0 {
             bail!(
                 "geno line count {} does not match snp count {} for {}",

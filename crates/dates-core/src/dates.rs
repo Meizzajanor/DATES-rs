@@ -480,7 +480,6 @@ fn build_present_snps(
 
 fn build_weighted_values(present: &[PresentSnp], values: &mut Vec<f64>) -> Result<()> {
     values.clear();
-    let n = present.len();
     let mut ww1_dot_ww2 = 0.0;
     let mut ww2_dot_ww2 = 0.0;
     for snp in present {
@@ -493,7 +492,6 @@ fn build_weighted_values(present: &[PresentSnp], values: &mut Vec<f64>) -> Resul
         bail!("invalid ancestry-fit denominator");
     }
     let coeff = ww1_dot_ww2 / ww2_dot_ww2;
-    values.reserve(n);
     for snp in present {
         let prediction = coeff * snp.parent_a_freq + (1.0 - coeff) * snp.parent_b_freq;
         values.push((snp.genotype - prediction) * snp.weight);
