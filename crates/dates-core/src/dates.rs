@@ -333,16 +333,18 @@ fn run_direct_mode(
     params: &DatesParams,
     chrom_corr: &mut [Vec<Corr>],
 ) -> Result<()> {
+    let mut present = Vec::new();
+    let mut values = Vec::new();
     for individual_index in admixed {
         let timeoffset = centered_offsets
             .get(individual_index)
             .copied()
             .unwrap_or(0.0);
-        let present = build_present_snps(dataset, selected, *individual_index)?;
+        build_present_snps(dataset, selected, *individual_index, &mut present)?;
         if present.is_empty() {
             continue;
         }
-        let values = build_weighted_values(&present)?;
+        build_weighted_values(&present, &mut values)?;
         for left in 0..present.len() {
             for right in left + 1..present.len() {
                 if present[left].chrom != present[right].chrom {
@@ -377,12 +379,14 @@ fn run_qbin_mode(
     let num_dbins = num_bins * params.qbin;
     let diff_max = ((params.qbin as f64) * params.maxdis / params.binsize).round() as usize;
     let mut ddcbins = vec![vec![vec![0.0; num_dbins]; 7]; chrom_corr.len()];
+    let mut present = Vec::new();
+    let mut values = Vec::new();
     for individual_index in admixed {
-        let present = build_present_snps(dataset, selected, *individual_index)?;
+        build_present_snps(dataset, selected, *individual_index, &mut present)?;
         if present.is_empty() {
             continue;
         }
-        let values = build_weighted_values(&present)?;
+        build_weighted_values(&present, &mut values)?;
         let mut z0 = vec![0.0; num_qbins];
         let mut z1 = vec![0.0; num_qbins];
         let mut z2 = vec![0.0; num_qbins];
@@ -449,8 +453,9 @@ fn build_present_snps(
     dataset: &Dataset,
     selected: &[SelectedSnp],
     individual_index: usize,
-) -> Result<Vec<PresentSnp>> {
-    let mut present = Vec::new();
+    present: &mut Vec<PresentSnp>,
+) -> Result<()> {
+    present.clear();
     for snp in selected {
         let genotype = dataset.snps[snp.snp_index]
             .gtypes
@@ -470,42 +475,30 @@ fn build_present_snps(
             weight: snp.weight,
         });
     }
-    Ok(present)
+    Ok(())
 }
 
-fn build_weighted_values(present: &[PresentSnp]) -> Result<Vec<f64>> {
-    let w0 = present.iter().map(|snp| snp.genotype).collect::<Vec<_>>();
-    let w1 = present
-        .iter()
-        .map(|snp| snp.parent_a_freq)
-        .collect::<Vec<_>>();
-    let w2 = present
-        .iter()
-        .map(|snp| snp.parent_b_freq)
-        .collect::<Vec<_>>();
-    let ww1 = w0
-        .iter()
-        .zip(w2.iter())
-        .map(|(lhs, rhs)| lhs - rhs)
-        .collect::<Vec<_>>();
-    let ww2 = w1
-        .iter()
-        .zip(w2.iter())
-        .map(|(lhs, rhs)| lhs - rhs)
-        .collect::<Vec<_>>();
-    let denom = dot(&ww2, &ww2);
-    if denom <= 1.0e-20 {
+fn build_weighted_values(present: &[PresentSnp], values: &mut Vec<f64>) -> Result<()> {
+    values.clear();
+    let n = present.len();
+    let mut ww1_dot_ww2 = 0.0;
+    let mut ww2_dot_ww2 = 0.0;
+    for snp in present {
+        let diff1 = snp.genotype - snp.parent_b_freq;
+        let diff2 = snp.parent_a_freq - snp.parent_b_freq;
+        ww1_dot_ww2 += diff1 * diff2;
+        ww2_dot_ww2 += diff2 * diff2;
+    }
+    if ww2_dot_ww2 <= 1.0e-20 {
         bail!("invalid ancestry-fit denominator");
     }
-    let coeff = dot(&ww1, &ww2) / denom;
-    Ok(present
-        .iter()
-        .zip(w1.iter().zip(w2.iter()))
-        .map(|(snp, (freq_a, freq_b))| {
-            let prediction = coeff * freq_a + (1.0 - coeff) * freq_b;
-            (snp.genotype - prediction) * snp.weight
-        })
-        .collect())
+    let coeff = ww1_dot_ww2 / ww2_dot_ww2;
+    values.reserve(n);
+    for snp in present {
+        let prediction = coeff * snp.parent_a_freq + (1.0 - coeff) * snp.parent_b_freq;
+        values.push((snp.genotype - prediction) * snp.weight);
+    }
+    Ok(())
 }
 
 fn allele_frequency(snp: &crate::dataset::Snp, individuals: &[usize]) -> Result<f64> {
@@ -584,13 +577,6 @@ fn dump_output(
     }
     fs::write(path, out).with_context(|| format!("failed to write {}", path.display()))?;
     Ok(())
-}
-
-fn dot(left: &[f64], right: &[f64]) -> f64 {
-    left.iter()
-        .zip(right.iter())
-        .map(|(lhs, rhs)| lhs * rhs)
-        .sum()
 }
 
 fn pad_corr(mut values: Vec<f64>, target_len: usize) -> Vec<f64> {

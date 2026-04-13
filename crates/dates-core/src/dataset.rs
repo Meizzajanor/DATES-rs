@@ -1,7 +1,8 @@
 //! Dataset loading and typed data model for DATES.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::fs;
+use std::fs::{self, File};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -304,26 +305,36 @@ fn load_snps(path: &Path, badsnp_path: Option<&Path>) -> Result<Vec<Snp>> {
 }
 
 fn load_text_genotypes(path: &Path, snps: &mut [Snp], num_individuals: usize) -> Result<()> {
-    let bytes = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
-    if bytes.starts_with(b"GENO") {
+    let file =
+        File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let mut reader = BufReader::new(file);
+
+    // Peek at the first four bytes to detect packed Eigenstrat format.
+    let buf = reader.fill_buf()?;
+    if buf.starts_with(b"GENO") {
         bail!(
             "packed Eigenstrat input is not yet supported in DATES-rs: {}",
             path.display()
         );
     }
-    let raw = String::from_utf8(bytes)
-        .with_context(|| format!("{} is not valid UTF-8 text geno input", path.display()))?;
-    let lines: Vec<_> = raw.lines().collect();
-    if lines.len() != snps.len() {
-        bail!(
-            "geno line count {} does not match snp count {} for {}",
-            lines.len(),
-            snps.len(),
-            path.display()
-        );
-    }
-    for (snp, line) in snps.iter_mut().zip(lines) {
-        let trimmed = line.trim();
+
+    let mut line_buf = String::new();
+    let mut line_count: usize = 0;
+    for snp in snps.iter_mut() {
+        line_buf.clear();
+        let bytes_read = reader
+            .read_line(&mut line_buf)
+            .with_context(|| format!("{} is not valid UTF-8 text geno input", path.display()))?;
+        if bytes_read == 0 {
+            bail!(
+                "geno line count {} does not match snp count {} for {}",
+                line_count,
+                snps.len(),
+                path.display()
+            );
+        }
+        line_count += 1;
+        let trimmed = line_buf.trim();
         if trimmed.len() != num_individuals {
             bail!(
                 "geno row length {} does not match indiv count {} for SNP {}",
@@ -344,6 +355,16 @@ fn load_text_genotypes(path: &Path, snps: &mut [Snp], num_individuals: usize) ->
             gtypes.push(value);
         }
         snp.gtypes = gtypes;
+    }
+    // Verify that the file has no extra lines beyond what was expected.
+    line_buf.clear();
+    if reader.read_line(&mut line_buf)? > 0 {
+        bail!(
+            "geno line count {} does not match snp count {} for {}",
+            line_count + 1,
+            snps.len(),
+            path.display()
+        );
     }
     Ok(())
 }

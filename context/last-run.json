@@ -2,11 +2,7 @@
   "date": "2026-04-13",
   "status": "implementation verified",
   "touched_modules": [
-    "workspace manifests",
-    "core library (config, dates, dataset)",
-    "xtask manifest",
-    "docs",
-    "agent context"
+    "dates-core (dataset, dates, config)"
   ],
   "commands": [
     {
@@ -15,45 +11,29 @@
     },
     {
       "program": "cargo",
-      "args": ["fmt"]
-    },
-    {
-      "program": "cargo",
-      "args": ["fmt", "--check"]
-    },
-    {
-      "program": "cargo",
-      "args": ["clippy", "--workspace"]
-    },
-    {
-      "program": "cargo",
       "args": ["test", "--workspace"]
     }
   ],
   "checks": [
     {
-      "name": "cargo fmt --check",
+      "name": "cargo build --workspace",
       "status": "passed",
-      "details": "workspace formatted"
-    },
-    {
-      "name": "cargo clippy --workspace",
-      "status": "passed",
-      "details": "no warnings"
+      "details": "clean build"
     },
     {
       "name": "cargo test --workspace",
       "status": "passed",
-      "details": "17 tests passed"
+      "details": "19 tests passed (8 CLI integration + 11 core unit)"
     }
   ],
   "documentation": [
-    "docs/last-run.md"
+    "docs/last-run.md",
+    "context/last-run.json"
   ],
   "parity_state": "validated against the self-contained fixtures/toy golden corpus for the installed Rust CLI surface",
   "open_gaps": [
     "packed Eigenstrat support",
     "large-example parity corpus",
-    "production-scale performance validation"
+    "CLI argument parsing robustness (optional)"
   ]
 }
