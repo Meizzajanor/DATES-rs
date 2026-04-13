@@ -385,6 +385,7 @@ mod tests {
             lovalfit: 0.45,
             chrom: None,
             nochrom: None,
+            numchrom: 22,
         };
         assert_eq!(params.admixpop.as_deref(), Some("SIM"));
     }

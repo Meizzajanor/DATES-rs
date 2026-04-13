@@ -7,6 +7,4 @@ license.workspace = true
 [dependencies]
 anyhow.workspace = true
 dates-core = { path = "../crates/dates-core" }
-serde.workspace = true
-serde_json.workspace = true
 

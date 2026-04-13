@@ -71,6 +71,9 @@ pub fn run_dates(par_path: &Path, verbose: bool) -> Result<()> {
         BTreeMap::new().into_iter().collect()
     };
     let timeoffset_map = if let Some(path) = &params.timeoffsetname {
+        if params.qbin > 0 {
+            bail!("timeoffsetname is not supported with qbin > 0");
+        }
         load_individual_values(resolve_param_path(&par_path, path))?
     } else {
         BTreeMap::new().into_iter().collect()
@@ -159,9 +162,14 @@ fn run_job(
         bail!("no admixed samples found");
     }
 
+    let max_chrom = if params.numchrom > 0 {
+        params.numchrom
+    } else {
+        22
+    };
     let mut selected = Vec::new();
     for (snp_index, snp) in dataset.snps.iter().enumerate() {
-        if snp.chrom < 1 || snp.chrom > 22 {
+        if snp.chrom < 1 || snp.chrom > max_chrom {
             continue;
         }
         if let Some(chrom) = params.chrom
@@ -233,16 +241,9 @@ fn run_job(
     }
 
     let num_bins = (params.maxdis / params.binsize).round() as usize + 5;
-    let mut chrom_corr = vec![vec![Corr::default(); num_bins]; 23];
+    let mut chrom_corr = vec![vec![Corr::default(); num_bins]; max_chrom as usize + 1];
     if params.qbin > 0 {
-        run_qbin_mode(
-            dataset,
-            &selected,
-            &admixed,
-            &centered_offsets,
-            params,
-            &mut chrom_corr,
-        )?;
+        run_qbin_mode(dataset, &selected, &admixed, params, &mut chrom_corr)?;
     } else {
         run_direct_mode(
             dataset,
@@ -267,7 +268,12 @@ fn run_job(
         params.runmode,
     )?;
     if params.jackknife {
-        for (chrom, chrom_bins) in chrom_corr.iter().enumerate().take(23).skip(1) {
+        for (chrom, chrom_bins) in chrom_corr
+            .iter()
+            .enumerate()
+            .take(max_chrom as usize + 1)
+            .skip(1)
+        {
             let mut leave_out = Vec::with_capacity(num_bins);
             for bin in 0..num_bins {
                 leave_out.push(global[bin].minus(chrom_bins[bin])?);
@@ -368,7 +374,6 @@ fn run_qbin_mode(
     dataset: &Dataset,
     selected: &[SelectedSnp],
     admixed: &[usize],
-    centered_offsets: &BTreeMap<usize, f64>,
     params: &DatesParams,
     chrom_corr: &mut [Vec<Corr>],
 ) -> Result<()> {
@@ -379,12 +384,8 @@ fn run_qbin_mode(
         .unwrap_or(0);
     let num_dbins = num_bins * params.qbin;
     let diff_max = ((params.qbin as f64) * params.maxdis / params.binsize).round() as usize;
-    let mut ddcbins = vec![vec![vec![0.0; num_dbins]; 7]; 23];
+    let mut ddcbins = vec![vec![vec![0.0; num_dbins]; 7]; chrom_corr.len()];
     for individual_index in admixed {
-        let timeoffset = centered_offsets
-            .get(individual_index)
-            .copied()
-            .unwrap_or(0.0);
         let present = build_present_snps(dataset, selected, *individual_index)?;
         if present.is_empty() {
             continue;
@@ -426,10 +427,9 @@ fn run_qbin_mode(
                 ddcbins[chrom as usize][6][d] += dd20[d];
             }
         }
-        let _ = timeoffset;
     }
     let dbinsize = params.binsize / params.qbin as f64;
-    for (chrom, chrom_bins) in ddcbins.iter().enumerate().take(23).skip(1) {
+    for (chrom, chrom_bins) in ddcbins.iter().enumerate().take(chrom_corr.len()).skip(1) {
         for (d, dd00) in chrom_bins[0].iter().enumerate().take(num_dbins).skip(1) {
             let dd00 = *dd00;
             if dd00 < 0.5 {

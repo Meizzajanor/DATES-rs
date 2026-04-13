@@ -51,6 +51,7 @@ pub struct DatesParams {
     pub lovalfit: f64,
     pub chrom: Option<i32>,
     pub nochrom: Option<i32>,
+    pub numchrom: i32,
 }
 
 impl LegacyParamFile {
@@ -172,6 +173,7 @@ impl DatesParams {
             lovalfit: params.get_f64("lovalfit")?.unwrap_or(0.45),
             chrom: params.get_i32("chrom")?,
             nochrom: params.get_i32("nochrom")?,
+            numchrom: params.get_i32("numchrom")?.unwrap_or(22),
         })
     }
 }

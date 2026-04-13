@@ -6,7 +6,7 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-clap.workspace = true
+
 dates-core = { path = "../dates-core" }
 
 [dev-dependencies]
