@@ -1,0 +1,18 @@
+[package]
+name = "dates-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+nalgebra.workspace = true
+num-complex.workspace = true
+rand.workspace = true
+rand_chacha.workspace = true
+rustfft.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
