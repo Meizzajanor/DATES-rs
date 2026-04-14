@@ -2,38 +2,54 @@
   "date": "2026-04-13",
   "status": "implementation verified",
   "touched_modules": [
-    "dates-core (dataset, dates, config)"
+    "dates-core (dates, workflow, config, dataset, fit, plot)",
+    "dates-cli tests",
+    "docs"
   ],
   "commands": [
     {
       "program": "cargo",
-      "args": ["build", "--workspace"]
+      "args": ["fmt"]
     },
     {
       "program": "cargo",
       "args": ["test", "--workspace"]
+    },
+    {
+      "program": "cargo",
+      "args": ["clippy"]
+    },
+    {
+      "program": "cargo",
+      "args": ["run", "-p", "xtask", "--", "verify"]
     }
   ],
   "checks": [
     {
-      "name": "cargo build --workspace",
-      "status": "passed",
-      "details": "clean build"
-    },
-    {
       "name": "cargo test --workspace",
       "status": "passed",
-      "details": "19 tests passed (8 CLI integration + 11 core unit)"
+      "details": "37 tests passed across core, CLI, and xtask targets"
+    },
+    {
+      "name": "cargo clippy",
+      "status": "passed",
+      "details": "workspace lint pass with no warnings"
+    },
+    {
+      "name": "cargo run -p xtask -- verify",
+      "status": "passed",
+      "details": "run-artifact metadata verified"
     }
   ],
   "documentation": [
     "docs/last-run.md",
     "context/last-run.json"
   ],
-  "parity_state": "validated against the self-contained fixtures/toy golden corpus for the installed Rust CLI surface",
+  "parity_state": "unchanged from the prior verified state; helper workflow behavior remains validated against the self-contained fixtures/toy golden corpus and targeted regressions for helper path resolution, numchrom > 22, filtered fit windows, non-default plot ranges, helper failure without cwd leakage, and explicit runmode == 2 rejection",
   "open_gaps": [
     "packed Eigenstrat support",
+    "runmode == 2 end-to-end compatibility",
     "large-example parity corpus",
-    "CLI argument parsing robustness (optional)"
+    "production-scale runtime and numerical validation"
   ]
 }

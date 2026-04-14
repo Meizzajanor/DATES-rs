@@ -53,6 +53,8 @@ fn main() -> Result<()> {
         high_cm,
         snp_override: map,
         admix_override: admix,
+        output_dir: None,
+        prefix_override: None,
         affine,
         seed,
     })?;

@@ -54,6 +54,13 @@ pub struct DatesParams {
     pub numchrom: i32,
 }
 
+/// A resolved output prefix together with the legacy label used in logs/titles.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OutputPrefix {
+    raw: String,
+    path: PathBuf,
+}
+
 impl LegacyParamFile {
     /// Load and resolve a legacy DATES parameter file.
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
@@ -202,6 +209,172 @@ pub fn infer_output_prefix(
     Ok(name)
 }
 
+/// Resolve a parameter-derived path relative to the parameter-file directory.
+pub fn resolve_param_path(par_path: &Path, raw: impl AsRef<Path>) -> PathBuf {
+    let path = raw.as_ref();
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        par_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(path)
+    }
+}
+
+/// Resolve an optional parameter-derived path relative to the parameter file.
+pub fn resolve_optional_param_path(par_path: &Path, raw: Option<&str>) -> Option<PathBuf> {
+    raw.map(|value| resolve_param_path(par_path, value))
+}
+
+/// Resolve the helper-workflow output prefix relative to the selected output base.
+pub fn resolve_output_prefix(
+    params: &LegacyParamFile,
+    admix_override: Option<&str>,
+    output_base_dir: &Path,
+) -> Result<OutputPrefix> {
+    OutputPrefix::resolve(
+        infer_output_prefix(params, admix_override)?,
+        output_base_dir,
+    )
+}
+
+impl OutputPrefix {
+    /// Resolve a raw legacy prefix string against the selected output base.
+    ///
+    /// Returns an error if the resolved path does not have a valid file name
+    /// component (e.g., the raw prefix is empty, consists only of separators,
+    /// or ends with a trailing slash).
+    pub fn resolve(raw: impl Into<String>, output_base_dir: &Path) -> Result<Self> {
+        let raw = raw.into();
+        let raw_path = Path::new(&raw);
+        let path = if raw_path.is_absolute() {
+            raw_path.to_path_buf()
+        } else {
+            output_base_dir.join(raw_path)
+        };
+        let file_name = path
+            .file_name()
+            .map(|n| n.to_string_lossy())
+            .unwrap_or_default();
+        if file_name.is_empty() {
+            bail!(
+                "output prefix {:?} does not resolve to a valid file name \
+                 (resolved to {}); supply a non-empty prefix such as \
+                 \"results/Prefix\"",
+                raw,
+                path.display()
+            );
+        }
+        Ok(Self { raw, path })
+    }
+
+    /// Build a prefix from an already-resolved path and an explicit label.
+    ///
+    /// Returns an error if the path does not have a valid file name component.
+    pub fn from_resolved(raw: impl Into<String>, path: PathBuf) -> Result<Self> {
+        let raw = raw.into();
+        let file_name = path
+            .file_name()
+            .map(|n| n.to_string_lossy())
+            .unwrap_or_default();
+        if file_name.is_empty() {
+            bail!(
+                "output prefix {:?} does not resolve to a valid file name \
+                 (path {}); supply a non-empty prefix such as \
+                 \"results/Prefix\"",
+                raw,
+                path.display()
+            );
+        }
+        Ok(Self { raw, path })
+    }
+
+    /// Return the legacy label used for plot titles and logs.
+    pub fn raw(&self) -> &str {
+        &self.raw
+    }
+
+    /// Return the resolved prefix path without a suffix.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Return the main `.out` path.
+    pub fn out_path(&self) -> PathBuf {
+        append_path_suffix(&self.path, ".out")
+    }
+
+    /// Return a chromosome-specific jackknife `.out:{chrom}` path.
+    pub fn chrom_out_path(&self, chrom: i32) -> PathBuf {
+        PathBuf::from(format!("{}:{chrom}", self.out_path().display()))
+    }
+
+    /// Return the `.fit` path.
+    pub fn fit_path(&self) -> PathBuf {
+        append_path_suffix(&self.path, ".fit")
+    }
+
+    /// Return the `.jin` path.
+    pub fn jin_path(&self) -> PathBuf {
+        append_path_suffix(&self.path, ".jin")
+    }
+
+    /// Return the `.jout` path.
+    pub fn jout_path(&self) -> PathBuf {
+        append_path_suffix(&self.path, ".jout")
+    }
+
+    /// Return the `.xtxt` path.
+    pub fn xtxt_path(&self) -> PathBuf {
+        append_path_suffix(&self.path, ".xtxt")
+    }
+
+    /// Return the `.ps` path.
+    pub fn ps_path(&self) -> PathBuf {
+        append_path_suffix(&self.path, ".ps")
+    }
+
+    /// Return the `.pdf` path.
+    pub fn pdf_path(&self) -> PathBuf {
+        append_path_suffix(&self.path, ".pdf")
+    }
+
+    /// Return the standalone expfit output path.
+    pub fn expfit_out_path(&self) -> PathBuf {
+        append_path_suffix(&self.path, ":expfit.out")
+    }
+
+    /// Return the `prefix_expfit.log` path.
+    pub fn expfit_log_path(&self) -> PathBuf {
+        self.sibling_path(format!("{}_expfit.log", self.leaf_name()))
+    }
+
+    /// Return the `expfit_prefix.log` path used by jackknife.
+    pub fn jackknife_log_path(&self) -> PathBuf {
+        self.sibling_path(format!("expfit_{}.log", self.leaf_name()))
+    }
+
+    /// Return the `expfit_prefix.flog` path used by jackknife.
+    pub fn jackknife_full_log_path(&self) -> PathBuf {
+        self.sibling_path(format!("expfit_{}.flog", self.leaf_name()))
+    }
+
+    fn leaf_name(&self) -> String {
+        self.path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| self.raw.clone())
+    }
+
+    fn sibling_path(&self, file_name: String) -> PathBuf {
+        let mut out = self.path.clone();
+        out.set_file_name(file_name);
+        out
+    }
+}
+
 fn required(params: &LegacyParamFile, key: &str) -> Result<String> {
     params
         .get_string(key)
@@ -277,6 +450,16 @@ fn strip_suffix<'a>(value: &'a str, suffix: &str) -> &'a str {
     value.strip_suffix(suffix).unwrap_or(value)
 }
 
+fn append_path_suffix(path: &Path, suffix: &str) -> PathBuf {
+    let mut out = path.to_path_buf();
+    let file_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    out.set_file_name(format!("{file_name}{suffix}"));
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -294,5 +477,53 @@ mod tests {
         raw.insert("indivname".to_owned(), "DIR/family.ind".to_owned());
         let resolved = resolve_entries(&raw);
         assert_eq!(resolved["indivname"], "./data/family.ind");
+    }
+
+    #[test]
+    fn resolves_parameter_paths_against_parents() {
+        let par = Path::new("/tmp/dates/run.par");
+        assert_eq!(
+            resolve_param_path(par, "toy.snp"),
+            PathBuf::from("/tmp/dates/toy.snp")
+        );
+        assert_eq!(
+            resolve_optional_param_path(par, Some("/data/toy.snp")),
+            Some(PathBuf::from("/data/toy.snp"))
+        );
+    }
+
+    #[test]
+    fn output_prefix_preserves_internal_dots() {
+        let prefix = OutputPrefix::resolve("results/Toy.v1", Path::new("/tmp/work")).unwrap();
+        assert_eq!(
+            prefix.out_path(),
+            PathBuf::from("/tmp/work/results/Toy.v1.out")
+        );
+        assert_eq!(
+            prefix.expfit_out_path(),
+            PathBuf::from("/tmp/work/results/Toy.v1:expfit.out")
+        );
+        assert_eq!(
+            prefix.expfit_log_path(),
+            PathBuf::from("/tmp/work/results/Toy.v1_expfit.log")
+        );
+    }
+
+    #[test]
+    fn output_prefix_rejects_dotdot_raw() {
+        let err = OutputPrefix::resolve("..", Path::new("/tmp/work")).unwrap_err();
+        assert!(
+            err.to_string().contains("valid file name"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn output_prefix_rejects_absolute_root() {
+        let err = OutputPrefix::resolve("/", Path::new("/tmp/work")).unwrap_err();
+        assert!(
+            err.to_string().contains("valid file name"),
+            "unexpected error: {err}"
+        );
     }
 }

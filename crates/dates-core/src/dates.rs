@@ -8,15 +8,18 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Context, Result, anyhow, bail};
 
-use crate::config::DatesParams;
+use crate::config::{DatesParams, OutputPrefix, resolve_optional_param_path, resolve_param_path};
 use crate::corr::Corr;
-use crate::dataset::{AdmixJob, Dataset, load_individual_values, load_weights};
+use crate::dataset::{AdmixJob, Dataset, load_individual_values, load_jobs, load_weights};
 use crate::fft::{auto_positive, cross_positive};
-use crate::workflow::{DatesJackknifeRequest, run_dates_expfit_from_par, run_dates_jackknife};
+use crate::workflow::{
+    DatesExpfitRequest, DatesJackknifeRequest, run_dates_expfit_from_par_with_paths,
+    run_dates_jackknife,
+};
 
 #[derive(Clone, Debug)]
 struct SelectedSnp {
@@ -53,6 +56,9 @@ pub fn run_dates(par_path: &Path, verbose: bool) -> Result<()> {
     if verbose {
         eprintln!("parameter file: {}", par_path.display());
     }
+    if params.runmode == 2 {
+        bail!("runmode 2 is not yet supported end-to-end in DATES-rs");
+    }
 
     let badsnp = resolve_optional_param_path(&par_path, params.badsnpname.as_deref());
     let dataset = Dataset::load(
@@ -64,7 +70,7 @@ pub fn run_dates(par_path: &Path, verbose: bool) -> Result<()> {
     if params.checkmap && !dataset.has_real_map() {
         bail!("running DATES without a real map; set checkmap: NO if that is intentional");
     }
-    let jobs = load_jobs_resolved(&params, &par_path)?;
+    let jobs = load_jobs(&params)?;
     let weight_map = if let Some(path) = &params.weightname {
         load_weights(resolve_param_path(&par_path, path))?
     } else {
@@ -122,8 +128,8 @@ fn run_job(
     } else {
         job.admixed.clone()
     };
-    let output_prefix = output_dir.join(&prefix);
-    let main_output = output_prefix.with_extension("out");
+    let output_prefix = OutputPrefix::resolve(prefix.clone(), &output_dir)?;
+    let main_output = output_prefix.out_path();
     let logfit = output_dir.join(format!("{}:log", job.admixed));
 
     if verbose {
@@ -132,7 +138,7 @@ fn run_job(
             job.source_a,
             job.source_b,
             job.admixed,
-            output_prefix.display()
+            output_prefix.path().display()
         );
     }
 
@@ -155,8 +161,11 @@ fn run_job(
         .filter_map(|(index, individual)| (individual.egroup == job.admixed).then_some(index))
         .collect::<Vec<_>>();
 
-    if parent_a.is_empty() || parent_b.is_empty() {
-        bail!("admixing population has no samples");
+    if parent_a.is_empty() {
+        bail!("source population {} has no samples", job.source_a);
+    }
+    if parent_b.is_empty() {
+        bail!("source population {} has no samples", job.source_b);
     }
     if admixed.is_empty() {
         bail!("no admixed samples found");
@@ -271,7 +280,7 @@ fn run_job(
                 leave_out.push(global[bin].minus(chrom_bins[bin])?);
             }
             dump_output(
-                Path::new(&format!("{}:{}", main_output.display(), chrom)),
+                &output_prefix.chrom_out_path(chrom as i32),
                 &leave_out,
                 num_bins.saturating_sub(5),
                 params.binsize,
@@ -282,8 +291,6 @@ fn run_job(
     }
 
     if params.runfit {
-        let cwd = std::env::current_dir()?;
-        std::env::set_current_dir(&output_dir)?;
         let summary = if params.jackknife {
             run_dates_jackknife(&DatesJackknifeRequest {
                 par_path: par_path.to_path_buf(),
@@ -292,27 +299,30 @@ fn run_job(
                 high_cm: 20.0,
                 snp_override: Some(resolve_param_path(par_path, &params.snpname)),
                 admix_override: Some(job.admixed.clone()),
+                output_dir: Some(output_dir.clone()),
+                prefix_override: Some(prefix.clone()),
                 affine: params.afffit,
                 seed: params.seed,
             })?
         } else {
-            let _ = run_dates_expfit_from_par(
+            let _ = run_dates_expfit_from_par_with_paths(&DatesExpfitRequest {
                 par_path,
-                3,
-                params.lovalfit,
-                params.afffit,
-                params.seed,
-                Some(&job.admixed),
-            )?;
+                data_col: 3,
+                low_cm: params.lovalfit,
+                affine: params.afffit,
+                seed: params.seed,
+                admix_override: Some(&job.admixed),
+                output_dir: Some(&output_dir),
+                prefix_override: Some(&prefix),
+            })?;
             crate::dataset::JackknifeSummary {
                 mean: 0.0,
                 std_err: 0.0,
             }
         };
-        std::env::set_current_dir(cwd)?;
         let mut log_body = String::new();
         log_body.push_str("calling fit!...\n");
-        log_body.push_str(&format!("prefix: {}\n", prefix));
+        log_body.push_str(&format!("prefix: {}\n", output_prefix.raw()));
         if params.jackknife {
             log_body.push_str(&format!(
                 "jackknife summary: {:9.3} {:9.3}\n",
@@ -541,7 +551,7 @@ fn assign_qbins(selected: &mut [SelectedSnp], binsize: f64, qbin: usize) {
 
 fn sum_chrom_corr(chrom_corr: &[Vec<Corr>], num_bins: usize) -> Vec<Corr> {
     let mut global = vec![Corr::default(); num_bins];
-    for chrom_bins in chrom_corr.iter().take(23).skip(1) {
+    for chrom_bins in chrom_corr.iter().skip(1) {
         for bin in 0..num_bins {
             global[bin] = global[bin].plus(chrom_bins[bin]);
         }
@@ -588,90 +598,68 @@ fn strip_out_suffix(value: &str) -> &str {
     value.strip_suffix(".out").unwrap_or(value)
 }
 
-fn resolve_param_path(par_path: &Path, raw: &str) -> PathBuf {
-    let path = Path::new(raw);
-    if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        par_path
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .join(path)
-    }
-}
-
-fn resolve_optional_param_path(par_path: &Path, raw: Option<&str>) -> Option<PathBuf> {
-    raw.map(|path| resolve_param_path(par_path, path))
-}
-
-fn load_jobs_resolved(params: &DatesParams, par_path: &Path) -> Result<Vec<AdmixJob>> {
-    if let Some(admixlist) = &params.admixlist {
-        let path = resolve_param_path(par_path, admixlist);
-        let raw = fs::read_to_string(&path)
-            .with_context(|| format!("failed to read admix list {}", path.display()))?;
-        let mut jobs = Vec::new();
-        for line in raw.lines() {
-            let trimmed = line.trim();
-            if trimmed.is_empty() || trimmed.starts_with('#') {
-                continue;
-            }
-            let parts: Vec<_> = trimmed.split_whitespace().collect();
-            if parts.len() != 4 {
-                bail!("admixlist line must have 4 fields: {trimmed}");
-            }
-            jobs.push(AdmixJob {
-                source_a: parts[0].to_owned(),
-                source_b: parts[1].to_owned(),
-                admixed: parts[2].to_owned(),
-                output_dir: Some(resolve_param_path(par_path, parts[3])),
-            });
-        }
-        return Ok(jobs);
-    }
-    let poplist = params
-        .poplistname
-        .as_deref()
-        .ok_or_else(|| anyhow!("missing poplistname"))?;
-    let path = resolve_param_path(par_path, poplist);
-    let raw =
-        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
-    let groups = raw
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .map(ToOwned::to_owned)
-        .collect::<Vec<_>>();
-    if groups.len() != 2 {
-        bail!("poplistname must contain exactly two groups");
-    }
-    Ok(vec![AdmixJob {
-        source_a: groups[0].clone(),
-        source_b: groups[1].clone(),
-        admixed: params
-            .admixpop
-            .clone()
-            .ok_or_else(|| anyhow!("missing admixpop"))?,
-        output_dir: None,
-    }])
-}
-
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
+    use std::sync::{Mutex, OnceLock};
 
-    use super::resolve_optional_param_path;
+    use super::*;
+
+    fn cwd_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     #[test]
-    fn resolves_optional_paths_against_parameter_directory() {
-        let par_path = Path::new("/tmp/dates/parfile.par");
-        assert_eq!(
-            resolve_optional_param_path(par_path, Some("badsnps.txt")),
-            Some(PathBuf::from("/tmp/dates/badsnps.txt"))
+    fn sum_chrom_corr_uses_all_allocated_chromosomes() {
+        let mut chrom_corr = vec![vec![Corr::default(); 1]; 25];
+        chrom_corr[23][0].s0 = 5.0;
+        let global = sum_chrom_corr(&chrom_corr, 1);
+        assert_eq!(global[0].s0, 5.0);
+    }
+
+    #[test]
+    fn run_dates_keeps_current_dir_when_helper_fit_fails() {
+        let _guard = cwd_lock().lock().unwrap();
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/toy");
+        let data_dir = tempfile::tempdir().unwrap();
+        let work_dir = tempfile::tempdir().unwrap();
+        for name in ["toy.geno", "toy.snp", "toy.ind", "poplist.txt"] {
+            fs::copy(fixture.join(name), data_dir.path().join(name)).unwrap();
+        }
+        fs::write(
+            data_dir.path().join("par.dates"),
+            "genotypename: toy.geno\n\
+             snpname: toy.snp\n\
+             indivname: toy.ind\n\
+             poplistname: poplist.txt\n\
+             admixpop: Mix\n\
+             output: Toy.out\n\
+             binsize: 0.005\n\
+             maxdis: 0.025\n\
+             seed: 77\n\
+             runmode: 1\n\
+             checkmap: NO\n\
+             numchrom: 2\n\
+             qbin: 0\n\
+             jackknife: YES\n\
+             runfit: YES\n\
+             afffit: YES\n\
+             lovalfit: 2.5\n",
+        )
+        .unwrap();
+
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(work_dir.path()).unwrap();
+        let result = run_dates(&data_dir.path().join("par.dates"), false);
+        let final_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(original).unwrap();
+
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("at least two usable rows"),
+            "unexpected error: {err}"
         );
-        assert_eq!(
-            resolve_optional_param_path(par_path, Some("/data/badsnps.txt")),
-            Some(PathBuf::from("/data/badsnps.txt"))
-        );
-        assert_eq!(resolve_optional_param_path(par_path, None), None);
+        assert_eq!(final_dir, work_dir.path());
     }
 }

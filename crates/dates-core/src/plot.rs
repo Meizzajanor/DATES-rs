@@ -23,7 +23,7 @@ pub struct PlotSpec {
 
 impl PlotSpec {
     /// Build a plot spec from fitted rows.
-    pub fn from_fit(title: impl Into<String>, rows: &[FitRow]) -> Self {
+    pub fn from_fit(title: impl Into<String>, rows: &[FitRow], x_min: f64, x_max: f64) -> Self {
         let title = title.into();
         let mut y_min = f64::INFINITY;
         let mut y_max = f64::NEG_INFINITY;
@@ -44,8 +44,8 @@ impl PlotSpec {
             title,
             x_label: "Genetic Distance (cM)".to_owned(),
             y_label: "Weighted Covariance".to_owned(),
-            x_min: 0.5,
-            x_max: 20.0,
+            x_min,
+            x_max,
             y_min: y_min - pad,
             y_max: y_max + pad,
             data,
@@ -66,9 +66,9 @@ pub fn write_xtxt(path: &Path, spec: &PlotSpec, fit_path: &Path) -> Result<()> {
          set key top right\n\
          set xlabel  \"{}\"\n\
          set ylabel  \"{}\"\n\
-         set xrange [0.5:20]\n\
+         set xrange [{}:{}]\n\
          plot \"{}\" using 1:2  title \"data\", \"{}\" using 1:3 title \"fit\" with lines\n",
-        spec.title, spec.x_label, spec.y_label, fit_name, fit_name
+        spec.title, spec.x_label, spec.y_label, spec.x_min, spec.x_max, fit_name, fit_name
     );
     fs::write(path, body).with_context(|| format!("failed to write {}", path.display()))?;
     Ok(())
@@ -206,9 +206,64 @@ mod tests {
                 residual: 0.001,
             },
         ];
-        let spec = PlotSpec::from_fit("DATES: test", &rows);
+        let spec = PlotSpec::from_fit("DATES: test", &rows, 0.5, 20.0);
         write_ps(&dir.path().join("plot.ps"), &spec).unwrap();
         write_pdf(&dir.path().join("plot.pdf"), &spec).unwrap();
         write_xtxt(&dir.path().join("plot.xtxt"), &spec, Path::new("fit.out")).unwrap();
+    }
+
+    #[test]
+    fn xtxt_uses_requested_x_range() {
+        let dir = tempfile::tempdir().unwrap();
+        let rows = vec![
+            FitRow {
+                distance_cm: 1.0,
+                observed: 0.02,
+                fitted: 0.018,
+                residual: 0.002,
+            },
+            FitRow {
+                distance_cm: 5.0,
+                observed: 0.018,
+                fitted: 0.017,
+                residual: 0.001,
+            },
+        ];
+        let spec = PlotSpec::from_fit("DATES: test", &rows, 1.0, 5.0);
+        let path = dir.path().join("plot.xtxt");
+        write_xtxt(&path, &spec, Path::new("fit.out")).unwrap();
+        let body = fs::read_to_string(path).unwrap();
+        assert!(body.contains("set xrange [1:5]"));
+    }
+
+    #[test]
+    fn ps_and_pdf_coordinates_follow_requested_x_range() {
+        let rows = vec![
+            FitRow {
+                distance_cm: 1.0,
+                observed: 0.02,
+                fitted: 0.018,
+                residual: 0.002,
+            },
+            FitRow {
+                distance_cm: 5.0,
+                observed: 0.018,
+                fitted: 0.017,
+                residual: 0.001,
+            },
+        ];
+        let default = PlotSpec::from_fit("DATES: test", &rows, 0.5, 20.0);
+        let narrowed = PlotSpec::from_fit("DATES: test", &rows, 1.0, 5.0);
+        let default_ps = render_ps_series(&default, &default.data, "0 0 0");
+        let narrowed_ps = render_ps_series(&narrowed, &narrowed.data, "0 0 0");
+        let default_pdf = render_pdf_series(&default, &default.data, "0 0 0");
+        let narrowed_pdf = render_pdf_series(&narrowed, &narrowed.data, "0 0 0");
+
+        assert_ne!(default_ps, narrowed_ps);
+        assert_ne!(default_pdf, narrowed_pdf);
+        assert!(narrowed_ps.contains("70.00"));
+        assert!(narrowed_ps.contains("550.00"));
+        assert!(narrowed_pdf.contains("70.00"));
+        assert!(narrowed_pdf.contains("550.00"));
     }
 }
