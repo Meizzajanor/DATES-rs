@@ -1,7 +1,8 @@
 //! Dataset loading and typed data model for DATES.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::fs;
+use std::fs::{self, File};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -304,26 +305,37 @@ fn load_snps(path: &Path, badsnp_path: Option<&Path>) -> Result<Vec<Snp>> {
 }
 
 fn load_text_genotypes(path: &Path, snps: &mut [Snp], num_individuals: usize) -> Result<()> {
-    let bytes = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
-    if bytes.starts_with(b"GENO") {
+    let file = File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let mut reader = BufReader::new(file);
+
+    // Peek at the first four bytes to detect packed Eigenstrat format.
+    let buf = reader
+        .fill_buf()
+        .with_context(|| format!("failed to peek geno header for {}", path.display()))?;
+    if buf.starts_with(b"GENO") {
         bail!(
             "packed Eigenstrat input is not yet supported in DATES-rs: {}",
             path.display()
         );
     }
-    let raw = String::from_utf8(bytes)
-        .with_context(|| format!("{} is not valid UTF-8 text geno input", path.display()))?;
-    let lines: Vec<_> = raw.lines().collect();
-    if lines.len() != snps.len() {
-        bail!(
-            "geno line count {} does not match snp count {} for {}",
-            lines.len(),
-            snps.len(),
-            path.display()
-        );
-    }
-    for (snp, line) in snps.iter_mut().zip(lines) {
-        let trimmed = line.trim();
+
+    let mut line_buf = String::new();
+    let mut line_count: usize = 0;
+    for snp in snps.iter_mut() {
+        line_buf.clear();
+        let bytes_read = reader
+            .read_line(&mut line_buf)
+            .with_context(|| format!("failed to read line from geno file {}", path.display()))?;
+        if bytes_read == 0 {
+            bail!(
+                "geno line count {} does not match snp count {} for {}",
+                line_count,
+                snps.len(),
+                path.display()
+            );
+        }
+        line_count += 1;
+        let trimmed = line_buf.trim();
         if trimmed.len() != num_individuals {
             bail!(
                 "geno row length {} does not match indiv count {} for SNP {}",
@@ -344,6 +356,25 @@ fn load_text_genotypes(path: &Path, snps: &mut [Snp], num_individuals: usize) ->
             gtypes.push(value);
         }
         snp.gtypes = gtypes;
+    }
+    // Verify that the file has no extra lines beyond what was expected.
+    loop {
+        line_buf.clear();
+        let n = reader
+            .read_line(&mut line_buf)
+            .with_context(|| format!("failed to read line from geno file {}", path.display()))?;
+        if n == 0 {
+            break;
+        }
+        line_count += 1;
+    }
+    if line_count != snps.len() {
+        bail!(
+            "geno line count {} does not match snp count {} for {}",
+            line_count,
+            snps.len(),
+            path.display()
+        );
     }
     Ok(())
 }
@@ -388,5 +419,78 @@ mod tests {
             numchrom: 22,
         };
         assert_eq!(params.admixpop.as_deref(), Some("SIM"));
+    }
+
+    /// Helper: create a minimal SNP vec for genotype loading tests.
+    fn test_snps(ids: &[&str]) -> Vec<Snp> {
+        ids.iter()
+            .map(|id| Snp {
+                id: id.to_string(),
+                chrom: 1,
+                genpos: 0.0,
+                physpos: 0.0,
+                alleles: ['A', 'T'],
+                gtypes: Vec::new(),
+                qbin_tag: -1,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn load_text_genotypes_rejects_packed_header() {
+        let dir = tempfile::tempdir().unwrap();
+        let geno = dir.path().join("test.geno");
+        fs::write(&geno, b"GENO\x03packed data").unwrap();
+        let mut snps = test_snps(&["s1"]);
+        let err = load_text_genotypes(&geno, &mut snps, 3)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("packed Eigenstrat input is not yet supported"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn load_text_genotypes_detects_too_few_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let geno = dir.path().join("test.geno");
+        // Only 1 line but 2 SNPs expected.
+        fs::write(&geno, "012\n").unwrap();
+        let mut snps = test_snps(&["s1", "s2"]);
+        let err = load_text_genotypes(&geno, &mut snps, 3)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("does not match snp count"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn load_text_genotypes_detects_extra_trailing_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let geno = dir.path().join("test.geno");
+        // 3 lines but only 2 SNPs expected.
+        fs::write(&geno, "012\n012\n012\n").unwrap();
+        let mut snps = test_snps(&["s1", "s2"]);
+        let err = load_text_genotypes(&geno, &mut snps, 3)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("does not match snp count"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn load_text_genotypes_happy_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let geno = dir.path().join("test.geno");
+        fs::write(&geno, "012\n290\n").unwrap();
+        let mut snps = test_snps(&["s1", "s2"]);
+        load_text_genotypes(&geno, &mut snps, 3).unwrap();
+        assert_eq!(snps[0].gtypes, vec![0, 1, 2]);
+        assert_eq!(snps[1].gtypes, vec![2, -1, 0]);
     }
 }
