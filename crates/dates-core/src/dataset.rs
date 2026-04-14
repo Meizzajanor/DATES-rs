@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 
-use crate::config::DatesParams;
+use crate::config::{DatesParams, resolve_param_path};
 
 /// One individual entry from an Eigenstrat `.ind` file.
 #[derive(Clone, Debug)]
@@ -133,8 +133,9 @@ impl Dataset {
 /// Load `admixlist` or `poplistname` from a parsed `dates` parameter set.
 pub fn load_jobs(params: &DatesParams) -> Result<Vec<AdmixJob>> {
     if let Some(admixlist) = &params.admixlist {
-        let raw = fs::read_to_string(admixlist)
-            .with_context(|| format!("failed to read admix list {}", admixlist))?;
+        let path = resolve_param_path(&params.par_path, admixlist);
+        let raw = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read admix list {}", path.display()))?;
         let mut jobs = Vec::new();
         for line in raw.lines() {
             let trimmed = line.trim();
@@ -149,7 +150,7 @@ pub fn load_jobs(params: &DatesParams) -> Result<Vec<AdmixJob>> {
                 source_a: parts[0].to_owned(),
                 source_b: parts[1].to_owned(),
                 admixed: parts[2].to_owned(),
-                output_dir: Some(PathBuf::from(parts[3])),
+                output_dir: Some(resolve_param_path(&params.par_path, parts[3])),
             });
         }
         return Ok(jobs);
@@ -162,7 +163,9 @@ pub fn load_jobs(params: &DatesParams) -> Result<Vec<AdmixJob>> {
         .poplistname
         .clone()
         .ok_or_else(|| anyhow!("missing poplistname: for single-job execution"))?;
-    let raw = fs::read_to_string(&poplist).with_context(|| format!("failed to read {poplist}"))?;
+    let poplist_path = resolve_param_path(&params.par_path, &poplist);
+    let raw = fs::read_to_string(&poplist_path)
+        .with_context(|| format!("failed to read {}", poplist_path.display()))?;
     let groups: Vec<_> = raw
         .lines()
         .map(str::trim)
@@ -271,6 +274,7 @@ fn load_snps(path: &Path, badsnp_path: Option<&Path>) -> Result<Vec<Snp>> {
     let raw =
         fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
     let mut snps = Vec::new();
+    let mut previous = None::<(String, i32, f64)>;
     for line in raw.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
@@ -291,10 +295,14 @@ fn load_snps(path: &Path, badsnp_path: Option<&Path>) -> Result<Vec<Snp>> {
         } else {
             ['X', 'X']
         };
+        let chrom = parts[1].parse::<i32>()?;
+        let genpos = parts[2].parse::<f64>()?;
+        validate_snp_ordering(previous.as_ref(), parts[0], chrom, genpos)?;
+        previous = Some((parts[0].to_owned(), chrom, genpos));
         snps.push(Snp {
             id: parts[0].to_owned(),
-            chrom: parts[1].parse::<i32>()?,
-            genpos: parts[2].parse::<f64>()?,
+            chrom,
+            genpos,
             physpos: parts[3].parse::<f64>()?,
             alleles,
             gtypes: Vec::new(),
@@ -302,6 +310,31 @@ fn load_snps(path: &Path, badsnp_path: Option<&Path>) -> Result<Vec<Snp>> {
         });
     }
     Ok(snps)
+}
+
+fn validate_snp_ordering(
+    previous: Option<&(String, i32, f64)>,
+    current_id: &str,
+    current_chrom: i32,
+    current_genpos: f64,
+) -> Result<()> {
+    let Some((previous_id, previous_chrom, previous_genpos)) = previous else {
+        return Ok(());
+    };
+    if current_chrom < *previous_chrom
+        || (current_chrom == *previous_chrom && current_genpos < *previous_genpos)
+    {
+        bail!(
+            "snp file must be ordered by chromosome and genetic position: {} ({}, {}) before {} ({}, {})",
+            previous_id,
+            previous_chrom,
+            previous_genpos,
+            current_id,
+            current_chrom,
+            current_genpos
+        );
+    }
+    Ok(())
 }
 
 fn load_text_genotypes(path: &Path, snps: &mut [Snp], num_individuals: usize) -> Result<()> {
@@ -492,5 +525,17 @@ mod tests {
         load_text_genotypes(&geno, &mut snps, 3).unwrap();
         assert_eq!(snps[0].gtypes, vec![0, 1, 2]);
         assert_eq!(snps[1].gtypes, vec![2, -1, 0]);
+    }
+
+    #[test]
+    fn load_snps_rejects_out_of_order_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let snp = dir.path().join("test.snp");
+        fs::write(&snp, "s1 1 0.100 100 A T\ns2 1 0.090 90 A T\n").unwrap();
+        let err = load_snps(&snp, None).unwrap_err().to_string();
+        assert!(
+            err.contains("ordered by chromosome and genetic position"),
+            "unexpected error: {err}"
+        );
     }
 }

@@ -2,23 +2,24 @@
 
 - Date: 2026-04-13
 - Status: implementation verified
-- Touched modules: dates-core (dataset, dates, config)
+- Touched modules: `dates-core` (`dates`, `workflow`), docs
 - Commands run:
-  `cargo build --workspace`
+  `cargo fmt`
   `cargo test --workspace`
+  `cargo clippy`
+  `cargo run -p xtask -- verify`
 - Tests run:
   `cargo test --workspace`
-  8 CLI integration tests
-  11 core unit tests
-- Parity state: validated against the self-contained `fixtures/toy` golden corpus for the installed Rust CLI surface
+  37 total tests passed
+  `cargo clippy`
+  workspace lint pass with no warnings
+- Parity state: unchanged from the prior verified state; helper workflow behavior remains validated against the self-contained `fixtures/toy` golden corpus and targeted regressions for helper path resolution, `numchrom > 22`, filtered fit windows, non-default plot ranges, helper failure without `cwd` leakage, and explicit `runmode == 2` rejection
 - Documentation updated: `docs/last-run.md`, `context/last-run.json`
 - Changes in this run:
-  Replaced wholesale `fs::read` + `String::from_utf8` in `load_text_genotypes` with `BufReader` line-by-line streaming to reduce peak memory on large `.geno` files
-  Refactored `build_present_snps` and `build_weighted_values` to accept pre-allocated `&mut Vec` buffers, lifted allocations outside per-individual loops in `run_direct_mode` and `run_qbin_mode`
-  Eliminated intermediate `Vec` allocations inside `build_weighted_values` by computing dot products inline
-  Removed now-unused `dot()` helper
-  Added explanatory comment on the `for _ in 0..8` circuit-breaker loop in `resolve_entries`
+  Replaced the internal `run_dates_expfit_from_par_with_paths` argument list with a dedicated request struct to satisfy `clippy::too_many_arguments`
+  Updated the runtime call site to pass the request object without changing the public CLI-facing behavior
 - Remaining gaps:
   packed Eigenstrat support
+  `runmode == 2` end-to-end compatibility
   large-example parity corpus
-  CLI argument parsing robustness (optional)
+  production-scale runtime and numerical validation

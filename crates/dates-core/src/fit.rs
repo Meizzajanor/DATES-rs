@@ -22,6 +22,15 @@ pub fn fit_request(request: &FitRequest) -> Result<FitResult> {
     if rows.len() < 2 {
         bail!("fit input must contain at least two usable rows");
     }
+    rows.retain(|(distance_cm, _)| {
+        *distance_cm >= request.low_cm && *distance_cm <= request.high_cm
+    });
+    if rows.is_empty() {
+        bail!("no data after applying fit range");
+    }
+    if rows.len() < 2 {
+        bail!("fit range must retain at least two usable rows");
+    }
     let mut step = request
         .step_morgans
         .unwrap_or_else(|| (rows[1].0 - rows[0].0) / 100.0);
@@ -30,12 +39,6 @@ pub fn fit_request(request: &FitRequest) -> Result<FitResult> {
     }
     if step == 0.0 {
         step = 1.0;
-    }
-    rows.retain(|(distance_cm, _)| {
-        *distance_cm >= request.low_cm && *distance_cm <= request.high_cm
-    });
-    if rows.is_empty() {
-        bail!("no data after applying fit range");
     }
     let xbase = rows
         .iter()
@@ -319,5 +322,80 @@ mod tests {
                 .all(|value| value.is_finite())
         );
         assert!(result.coefficients.iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn fit_request_rejects_one_row_after_filtering() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("toy.out");
+        fs::write(&input, "0.5 0.050\n0.6 0.040\n0.7 0.033\n").unwrap();
+        let err = fit_request(&FitRequest {
+            input,
+            output: None,
+            num_exp: 1,
+            data_col: 1,
+            low_cm: 0.7,
+            high_cm: 5.0,
+            step_morgans: Some(0.001),
+            add_x: 0.0,
+            affine: true,
+            seed: 77,
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("fit range must retain at least two usable rows"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn fit_request_rejects_empty_window_after_filtering() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("toy.out");
+        fs::write(&input, "0.5 0.050\n0.6 0.040\n0.7 0.033\n").unwrap();
+        let err = fit_request(&FitRequest {
+            input,
+            output: None,
+            num_exp: 1,
+            data_col: 1,
+            low_cm: 1.0,
+            high_cm: 5.0,
+            step_morgans: Some(0.001),
+            add_x: 0.0,
+            affine: true,
+            seed: 77,
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("no data after applying fit range"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn fit_request_infers_step_from_retained_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("toy.out");
+        fs::write(
+            &input,
+            "0.5 0.050\n0.6 0.040\n1.5 0.033\n1.7 0.026\n1.9 0.021\n",
+        )
+        .unwrap();
+        let result = fit_request(&FitRequest {
+            input,
+            output: None,
+            num_exp: 1,
+            data_col: 1,
+            low_cm: 1.5,
+            high_cm: 5.0,
+            step_morgans: None,
+            add_x: 0.0,
+            affine: true,
+            seed: 77,
+        })
+        .unwrap();
+        assert!((result.step_morgans - 0.002).abs() < 1.0e-12);
     }
 }
