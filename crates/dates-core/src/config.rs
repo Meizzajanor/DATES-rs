@@ -211,11 +211,12 @@ fn required(params: &LegacyParamFile, key: &str) -> Result<String> {
 fn resolve_entries(entries: &BTreeMap<String, String>) -> BTreeMap<String, String> {
     let mut resolved = entries.clone();
     // Bounded loop acts as a circuit breaker: variable references (e.g. DIR in
-    // "DIR/file.geno") may transitively expand through other variables.  Each
-    // iteration resolves one level of indirection.  The limit of 8 passes is
-    // deliberately generous for realistic parameter files (which rarely nest
-    // beyond 2–3 levels) while still preventing infinite loops that would
-    // otherwise occur if definitions are cyclical (e.g. A -> $B, B -> $A).
+    // "DIR/file.geno" or "${DIR}/file.geno") may transitively expand through
+    // other variables.  Each iteration resolves one level of indirection.  The
+    // limit of 8 passes is deliberately generous for realistic parameter files
+    // (which rarely nest beyond 2–3 levels) while still preventing infinite
+    // loops that would otherwise occur if definitions are cyclical (e.g.
+    // A references ${B} and B references ${A}).
     for _ in 0..8 {
         let snapshot = resolved.clone();
         let mut changed = false;

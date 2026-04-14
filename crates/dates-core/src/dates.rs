@@ -333,8 +333,8 @@ fn run_direct_mode(
     params: &DatesParams,
     chrom_corr: &mut [Vec<Corr>],
 ) -> Result<()> {
-    let mut present = Vec::new();
-    let mut values = Vec::new();
+    let mut present = Vec::with_capacity(selected.len());
+    let mut values = Vec::with_capacity(selected.len());
     for individual_index in admixed {
         let timeoffset = centered_offsets
             .get(individual_index)
@@ -379,8 +379,8 @@ fn run_qbin_mode(
     let num_dbins = num_bins * params.qbin;
     let diff_max = ((params.qbin as f64) * params.maxdis / params.binsize).round() as usize;
     let mut ddcbins = vec![vec![vec![0.0; num_dbins]; 7]; chrom_corr.len()];
-    let mut present = Vec::new();
-    let mut values = Vec::new();
+    let mut present = Vec::with_capacity(selected.len());
+    let mut values = Vec::with_capacity(selected.len());
     for individual_index in admixed {
         build_present_snps(dataset, selected, *individual_index, &mut present)?;
         if present.is_empty() {
