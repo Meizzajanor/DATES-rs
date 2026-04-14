@@ -305,8 +305,7 @@ fn load_snps(path: &Path, badsnp_path: Option<&Path>) -> Result<Vec<Snp>> {
 }
 
 fn load_text_genotypes(path: &Path, snps: &mut [Snp], num_individuals: usize) -> Result<()> {
-    let file =
-        File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let file = File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
     let mut reader = BufReader::new(file);
 
     // Peek at the first four bytes to detect packed Eigenstrat format.
