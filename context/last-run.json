@@ -2,7 +2,8 @@
   "date": "2026-04-13",
   "status": "implementation verified",
   "touched_modules": [
-    "dates-core (dates, workflow)",
+    "dates-core (dates, workflow, config, dataset, fit, plot)",
+    "dates-cli tests",
     "docs"
   ],
   "commands": [

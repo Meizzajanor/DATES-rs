@@ -233,15 +233,19 @@ pub fn resolve_output_prefix(
     admix_override: Option<&str>,
     output_base_dir: &Path,
 ) -> Result<OutputPrefix> {
-    Ok(OutputPrefix::resolve(
+    OutputPrefix::resolve(
         infer_output_prefix(params, admix_override)?,
         output_base_dir,
-    ))
+    )
 }
 
 impl OutputPrefix {
     /// Resolve a raw legacy prefix string against the selected output base.
-    pub fn resolve(raw: impl Into<String>, output_base_dir: &Path) -> Self {
+    ///
+    /// Returns an error if the resolved path does not have a valid file name
+    /// component (e.g., the raw prefix is empty, consists only of separators,
+    /// or ends with a trailing slash).
+    pub fn resolve(raw: impl Into<String>, output_base_dir: &Path) -> Result<Self> {
         let raw = raw.into();
         let raw_path = Path::new(&raw);
         let path = if raw_path.is_absolute() {
@@ -249,15 +253,35 @@ impl OutputPrefix {
         } else {
             output_base_dir.join(raw_path)
         };
-        Self { raw, path }
+        let file_name = path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+        if file_name.is_empty() {
+            bail!(
+                "output prefix {:?} does not resolve to a valid file name \
+                 (resolved to {}); supply a non-empty prefix such as \
+                 \"results/Prefix\"",
+                raw,
+                path.display()
+            );
+        }
+        Ok(Self { raw, path })
     }
 
     /// Build a prefix from an already-resolved path and an explicit label.
-    pub fn from_resolved(raw: impl Into<String>, path: PathBuf) -> Self {
-        Self {
-            raw: raw.into(),
-            path,
+    ///
+    /// Returns an error if the path does not have a valid file name component.
+    pub fn from_resolved(raw: impl Into<String>, path: PathBuf) -> Result<Self> {
+        let raw = raw.into();
+        let file_name = path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+        if file_name.is_empty() {
+            bail!(
+                "output prefix {:?} does not resolve to a valid file name \
+                 (path {}); supply a non-empty prefix such as \
+                 \"results/Prefix\"",
+                raw,
+                path.display()
+            );
         }
+        Ok(Self { raw, path })
     }
 
     /// Return the legacy label used for plot titles and logs.
@@ -464,7 +488,7 @@ mod tests {
 
     #[test]
     fn output_prefix_preserves_internal_dots() {
-        let prefix = OutputPrefix::resolve("results/Toy.v1", Path::new("/tmp/work"));
+        let prefix = OutputPrefix::resolve("results/Toy.v1", Path::new("/tmp/work")).unwrap();
         assert_eq!(
             prefix.out_path(),
             PathBuf::from("/tmp/work/results/Toy.v1.out")
@@ -476,6 +500,26 @@ mod tests {
         assert_eq!(
             prefix.expfit_log_path(),
             PathBuf::from("/tmp/work/results/Toy.v1_expfit.log")
+        );
+    }
+
+    #[test]
+    fn output_prefix_rejects_dotdot_raw() {
+        let err = OutputPrefix::resolve("..", Path::new("/tmp/work"))
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("valid file name"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn output_prefix_rejects_absolute_root() {
+        let err = OutputPrefix::resolve("/", Path::new("/tmp/work"))
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("valid file name"),
+            "unexpected error: {err}"
         );
     }
 }

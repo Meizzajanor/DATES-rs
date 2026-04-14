@@ -36,7 +36,7 @@ pub fn run_dates_plot(
     seed: u64,
 ) -> Result<FitResult> {
     let output_base = std::env::current_dir()?;
-    let prefix = OutputPrefix::resolve(prefix, &output_base);
+    let prefix = OutputPrefix::resolve(prefix, &output_base)?;
     run_dates_plot_with_prefix(
         &prefix,
         data_col,
@@ -139,7 +139,7 @@ pub(crate) fn run_dates_expfit_from_par_with_paths(
         .parse::<f64>()
         .context("invalid binsize")?;
     let output = prefix.expfit_out_path();
-    let request = FitRequest {
+    let fit_request = FitRequest {
         input: prefix.out_path(),
         output: Some(output.clone()),
         num_exp: 1,
@@ -151,7 +151,7 @@ pub(crate) fn run_dates_expfit_from_par_with_paths(
         affine: request.affine,
         seed: request.seed,
     };
-    let (_, stdout) = run_fit(&request, "dates_expfit")?;
+    let (_, stdout) = run_fit(&fit_request, "dates_expfit")?;
     let log_path = prefix.expfit_log_path();
     fs::write(log_path, stdout)?;
     Ok(output)
@@ -282,7 +282,7 @@ fn resolve_workflow_prefix(
         None => std::env::current_dir()?,
     };
     Ok(match prefix_override {
-        Some(prefix) => OutputPrefix::resolve(prefix, &output_base),
+        Some(prefix) => OutputPrefix::resolve(prefix, &output_base)?,
         None => resolve_output_prefix(params, admix_override, &output_base)?,
     })
 }

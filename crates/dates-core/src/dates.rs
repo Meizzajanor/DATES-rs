@@ -128,7 +128,7 @@ fn run_job(
     } else {
         job.admixed.clone()
     };
-    let output_prefix = OutputPrefix::resolve(prefix.clone(), &output_dir);
+    let output_prefix = OutputPrefix::resolve(prefix.clone(), &output_dir)?;
     let main_output = output_prefix.out_path();
     let logfit = output_dir.join(format!("{}:log", job.admixed));
 
