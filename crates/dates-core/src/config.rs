@@ -253,7 +253,10 @@ impl OutputPrefix {
         } else {
             output_base_dir.join(raw_path)
         };
-        let file_name = path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+        let file_name = path
+            .file_name()
+            .map(|n| n.to_string_lossy())
+            .unwrap_or_default();
         if file_name.is_empty() {
             bail!(
                 "output prefix {:?} does not resolve to a valid file name \
@@ -271,7 +274,10 @@ impl OutputPrefix {
     /// Returns an error if the path does not have a valid file name component.
     pub fn from_resolved(raw: impl Into<String>, path: PathBuf) -> Result<Self> {
         let raw = raw.into();
-        let file_name = path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+        let file_name = path
+            .file_name()
+            .map(|n| n.to_string_lossy())
+            .unwrap_or_default();
         if file_name.is_empty() {
             bail!(
                 "output prefix {:?} does not resolve to a valid file name \
@@ -505,8 +511,7 @@ mod tests {
 
     #[test]
     fn output_prefix_rejects_dotdot_raw() {
-        let err = OutputPrefix::resolve("..", Path::new("/tmp/work"))
-            .unwrap_err();
+        let err = OutputPrefix::resolve("..", Path::new("/tmp/work")).unwrap_err();
         assert!(
             err.to_string().contains("valid file name"),
             "unexpected error: {err}"
@@ -515,8 +520,7 @@ mod tests {
 
     #[test]
     fn output_prefix_rejects_absolute_root() {
-        let err = OutputPrefix::resolve("/", Path::new("/tmp/work"))
-            .unwrap_err();
+        let err = OutputPrefix::resolve("/", Path::new("/tmp/work")).unwrap_err();
         assert!(
             err.to_string().contains("valid file name"),
             "unexpected error: {err}"
